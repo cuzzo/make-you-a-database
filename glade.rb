@@ -8,15 +8,27 @@ class Table
   end
 
   def <<(obj)
-    @data << obj
+    @data << serialize(obj)
   end
 
   def [](idx)
-    @data[idx]
+    deserialize(@data[idx])
   end
 
   def count()
     @data.count
+  end
+
+  private
+  # Strings are 64 bytes
+  def serialize(record)
+    balance = Float(record[0])
+    email = record[1][1...-1] # remove quotes
+    [balance, email].pack("DA64")
+  end
+
+  def deserialize(bytes)
+    bytes.unpack("DA64")
   end
 end
 
@@ -43,7 +55,7 @@ end
 # store bytes in array.
 def execute_insert(record)
   $table << record
-  $table.count
+  $table.count - 1
 end
 
 # move to position in memory.
