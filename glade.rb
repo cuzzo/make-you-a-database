@@ -4,31 +4,56 @@ class Table
   attr_reader :data
 
   def initialize()
-    @data = []
+    @data = PAGE_SIZE.times.map { |_| [] }
+    @count = 0
   end
 
   def <<(obj)
-    @data << serialize(obj)
+    idx = count
+    page, page_idx = page_idx(idx)
+    raise StandardError.new(:InsertError) if page >= PAGE_SIZE
+
+    record = serialize(obj)
+    @data[page][page_idx] = record
+    @count += 1
+
+    idx
   end
 
   def [](idx)
-    deserialize(@data[idx])
+    page, page_idx = page_idx(idx)
+    raise StandardError.new(:FetchError) if page >= PAGE_SIZE
+    deserialize(@data[page][page_idx])
   end
 
   def count()
-    @data.count
+    @count
   end
 
   private
+
+  FORMAT = "DA64" # D[ecimal] A[rray]64
+  RECORD_SIZE = 8 + 64 # Decimal (8, bytes) + A64 (Array, 64 bytes)
+  PAGE_SIZE = 4096 # Standard OS-level page size
+  ROWS_PER_PAGE = PAGE_SIZE / RECORD_SIZE # Inteeger division
+  PAGE_COUNT = 1000
+
+  # Get the page, and page_idx for a record idx
+  def page_idx(idx)
+    page = idx / ROWS_PER_PAGE
+    page_idx = idx % ROWS_PER_PAGE
+    [page, page_idx]
+  end
+
   # Strings are 64 bytes
   def serialize(record)
     balance = Float(record[0])
     email = record[1][1...-1] # remove quotes
-    [balance, email].pack("DA64")
+    [balance, email].pack(FORMAT)
   end
 
   def deserialize(bytes)
-    bytes.unpack("DA64")
+    bytes.unpack(FORMAT)
   end
 end
 
@@ -55,7 +80,6 @@ end
 # store bytes in array.
 def execute_insert(record)
   $table << record
-  $table.count - 1
 end
 
 # move to position in memory.
@@ -85,6 +109,8 @@ def handle_error(e, str)
     $stderr.puts("Unrecognized command '#{str}'.")
   when :SelectError
     $stderr.puts("Could not SELECT '#{str}'.")
+  when :FetchError
+    $stderror.puts("Could not FETCH '#{str}'.")
   else
     $stderr.puts("System failure: '#{e.message}'.")
   end
