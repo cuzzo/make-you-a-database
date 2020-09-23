@@ -6,6 +6,55 @@ class SqlSyntaxError < StandardError; end
 class SelectError < StandardError; end
 class PageOverflowError < StandardError; end
 
+class Cursor
+  attr_reader :table
+  attr_reader :row
+
+  def initialize(table, row)
+    @table = table
+    @row = row
+    @record_size = table.class.const_get(:RECORD_SIZE)
+    @rows_per_page = Pager::PAGE_SIZE / @record_size
+  end
+
+  def end?()
+    row = table.num_rows
+  end
+
+  def read()
+    page_num = row / @rows_per_page
+    page = table.pager.get_page(page_num)
+
+    page_offset = row % @rows_per_page
+    byte_offset = page_offset * table.class.const_get(:RECORD_SIZE)
+
+    serialized_record = page.slice(byte_offset, @record_size)
+    table.deserialize(serialized_record)
+  end
+
+  def write(record)
+    idx = row
+    page_num = row / @rows_per_page
+    page = table.pager.get_page(page_num)
+
+    page_offset = row % @rows_per_page
+    byte_offset = page_offset * table.class.const_get(:RECORD_SIZE)
+
+    page[byte_offset, @record_size] = table.serialize(record)
+    table.num_rows += 1
+
+    idx
+  end
+end
+
+def table_start(table)
+  Cursor.new(table, 0)
+end
+
+def table_end(table)
+  Cursor.new(table, table.num_rows)
+end
+
 class Pager
   attr_reader :file
   attr_reader :file_length
@@ -17,16 +66,9 @@ class Pager
     @pages = PAGE_COUNT.times.map { |_| nil }
   end
 
-  def fetch(record_idx, record_size)
-    page_num, page_offset = page_idx(record_idx, record_size)
-    page = get_page(page_num)
-    page.slice(page_offset * record_size, record_size)
-  end
-
   def write(record_idx, record_size, record_bytes)
     page_num, page_offset = page_idx(record_idx, record_size)
     page = get_page(page_num)
-    page[page_offset * record_size, record_size] = record_bytes
   end
 
   def close()
@@ -39,18 +81,7 @@ class Pager
     @file.close()
   end
 
-  private
-
   # Get the page, and page_idx for a record idx
-  def page_idx(idx, record_size)
-    rows_per_page = PAGE_SIZE / record_size # Inteeger division
-
-    page = idx / rows_per_page
-    page_idx = idx % rows_per_page
-
-    [page, page_idx]
-  end
-
   def get_page(idx)
     raise PageOverflowError.new("Cannot insert more records.") if idx >= PAGE_COUNT
 
@@ -83,38 +114,17 @@ end
 
 class Table
   attr_reader :pager
+  attr_accessor :num_rows
 
   def initialize(db_name)
     @pager = Pager.new(db_name)
-    @count = @pager.file_length / RECORD_SIZE
-  end
-
-  def <<(obj)
-    idx = count
-    @pager.write(idx, RECORD_SIZE, serialize(obj))
-    @count += 1
-    idx
-  end
-
-  def [](idx)
-    deserialize(@pager.fetch(idx, RECORD_SIZE))
-  end
-
-  def count()
-    @count
+    @num_rows = @pager.file_length / RECORD_SIZE
   end
 
   def close()
     @pager.close()
   end
 
-  private
-
-  FORMAT = "DA64" # D[ecimal] A[rray]64
-  RECORD_SIZE = 8 + 64 # Decimal (8, bytes) + A64 (Array, 64 bytes)
-
-
-  # Strings are 64 bytes
   def serialize(record)
     balance = Float(record[0])
     email = record[1][1...-1] # remove quotes
@@ -125,6 +135,10 @@ class Table
     bytes.unpack(FORMAT)
   end
 
+  private
+
+  FORMAT = "DA64" # D[ecimal] A[rray]64
+  RECORD_SIZE = 8 + 64 # Decimal (8, bytes) + A64 (Array, 64 bytes)
 end
 
 def print_prompt()
@@ -145,19 +159,14 @@ def parse_meta_command(cmd)
   end
 end
 
-# serialize record to bytes.
-### figure out byte size / format by schema
-### standard OS page size = 4096 bytes (4kb)
-# store bytes in array.
 def execute_insert(record)
-  $table << record
+  table_end($table).write(record)
 end
 
-# move to position in memory.
-# read size_of_record bytes.
-# deserialize bytes to record.
 def execute_select(id)
-  $table[Integer(id)]
+  Cursor
+    .new($table, Integer(id))
+    .read()
 rescue
   raise StandardError.new(:SelectError)
 end
