@@ -1,17 +1,23 @@
 #! /usr/bin/env ruby
 
+class InsertError < StandardError; end
+class FetchError < StandardError; end
+class SqlSyntaxError < StandardError; end
+class SelectError < StandardError; end
+class PageOverflowError < StandardError; end
+
 class Table
   attr_reader :data
 
   def initialize()
-    @data = PAGE_SIZE.times.map { |_| [] }
+    @data = PAGE_COUNT.times.map { |_| [] }
     @count = 0
   end
 
   def <<(obj)
     idx = count
     page, page_idx = page_idx(idx)
-    raise StandardError.new(:InsertError) if page >= PAGE_SIZE
+    raise PageOverflowError.new("Cannot insert more records.") if page >= PAGE_COUNT
 
     record = serialize(obj)
     @data[page][page_idx] = record
@@ -22,7 +28,7 @@ class Table
 
   def [](idx)
     page, page_idx = page_idx(idx)
-    raise StandardError.new(:FetchError) if page >= PAGE_SIZE
+    raise PageOverflowError.new("Index is to high for select.") if page >= PAGE_COUNT
     deserialize(@data[page][page_idx])
   end
 
@@ -70,7 +76,7 @@ def parse_meta_command(cmd)
   when "exit"
     exit
   else
-    raise StandardError.new(:SyntaxError)
+    raise SqlSyntaxError.new("Unsupported metacommand: '#{cmd}'.")
   end
 end
 
@@ -93,35 +99,25 @@ end
 
 def parse_statement(statement)
   tokens = statement.split(/\s+/)
-  case tokens.first.downcase
-  when "select"
+  case tokens.first.downcase.to_sym
+  when :select
     execute_select(tokens[1])
-  when "insert"
+  when :insert
     execute_insert(tokens[1..-1])
   else
-    raise StandardError.new(:SyntaxError)
+    raise SqlSyntaxError.new("Unspported statement: '#{statement}'.")
   end
 end
 
 def handle_error(e, str)
-  case e.message.to_sym
-  when :SyntaxError
-    $stderr.puts("Unrecognized command '#{str}'.")
-  when :SelectError
-    $stderr.puts("Could not SELECT '#{str}'.")
-  when :FetchError
-    $stderror.puts("Could not FETCH '#{str}'.")
-  else
-    $stderr.puts("System failure: '#{e.message}'.")
-  end
+  $stderr.puts(e)
 end
 
 def parse(str)
   if str[0] == "."
     parse_meta_command(str[1..-1])
   else
-    resp = parse_statement(str)
-    puts(resp)
+    parse_statement(str)
   end
 rescue => e
   handle_error(e, str)
@@ -129,8 +125,11 @@ end
 
 
 $table = Table.new
-while true do
-  print_prompt()
-  input = read_input()
-  parse(input)
+if $PROGRAM_NAME == __FILE__
+  while true do
+    print_prompt()
+    input = read_input()
+    resp = parse(input)
+    puts(resp)
+  end
 end
