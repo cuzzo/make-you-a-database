@@ -6,50 +6,113 @@ class SqlSyntaxError < StandardError; end
 class SelectError < StandardError; end
 class PageOverflowError < StandardError; end
 
-class Table
-  attr_reader :data
+class Pager
+  attr_reader :file
+  attr_reader :file_length
 
-  def initialize()
-    @data = PAGE_COUNT.times.map { |_| [] }
-    @count = 0
+  def initialize(file_path)
+    mode = File.exists?(file_path) ? "r+" : "w+"
+    @file = File.open(file_path, mode)
+    @file_length = @file.size
+    @pages = PAGE_COUNT.times.map { |_| nil }
+  end
+
+  def fetch(record_idx, record_size)
+    page_num, page_offset = page_idx(record_idx, record_size)
+    page = get_page(page_num)
+    page.slice(page_offset * record_size, record_size)
+  end
+
+  def write(record_idx, record_size, record_bytes)
+    page_num, page_offset = page_idx(record_idx, record_size)
+    page = get_page(page_num)
+    page[page_offset * record_size, record_size] = record_bytes
+  end
+
+  def close()
+    # Write all data in the pages to disk
+    @pages.each_with_index do |page, idx|
+      next if page.nil?
+      @file.seek(idx * PAGE_SIZE, IO::SEEK_SET)
+      bytes_written = @file.write(page)
+    end
+    @file.close()
+  end
+
+  private
+
+  # Get the page, and page_idx for a record idx
+  def page_idx(idx, record_size)
+    rows_per_page = PAGE_SIZE / record_size # Inteeger division
+
+    page = idx / rows_per_page
+    page_idx = idx % rows_per_page
+
+    [page, page_idx]
+  end
+
+  def get_page(idx)
+    raise PageOverflowError.new("Cannot insert more records.") if idx >= PAGE_COUNT
+
+    if @pages[idx].nil? # Cache miss
+      num_saved_pages = @file_length / PAGE_SIZE
+
+      # partial page can be saved at end of file...
+      if @file_length % PAGE_SIZE
+        num_saved_pages += 1
+      end
+
+      # if page exists, read it...
+      if idx <= num_saved_pages
+        @file.seek(idx * PAGE_SIZE, IO::SEEK_SET)
+        page = @file.read(PAGE_SIZE)
+      end
+
+      # TODO: This could overwrite data if there's an error.
+      page ||= [0].pack("C") * PAGE_SIZE
+
+      @pages[idx] = page
+    end
+
+    @pages[idx]
+  end
+
+  PAGE_SIZE = 4096 # Standard OS-level page size
+  PAGE_COUNT = 1000
+end
+
+class Table
+  attr_reader :pager
+
+  def initialize(db_name)
+    @pager = Pager.new(db_name)
+    @count = @pager.file_length / RECORD_SIZE
   end
 
   def <<(obj)
     idx = count
-    page, page_idx = page_idx(idx)
-    raise PageOverflowError.new("Cannot insert more records.") if page >= PAGE_COUNT
-
-    record = serialize(obj)
-    @data[page][page_idx] = record
+    @pager.write(idx, RECORD_SIZE, serialize(obj))
     @count += 1
-
     idx
   end
 
   def [](idx)
-    page, page_idx = page_idx(idx)
-    raise PageOverflowError.new("Index is to high for select.") if page >= PAGE_COUNT
-    deserialize(@data[page][page_idx])
+    deserialize(@pager.fetch(idx, RECORD_SIZE))
   end
 
   def count()
     @count
   end
 
+  def close()
+    @pager.close()
+  end
+
   private
 
   FORMAT = "DA64" # D[ecimal] A[rray]64
   RECORD_SIZE = 8 + 64 # Decimal (8, bytes) + A64 (Array, 64 bytes)
-  PAGE_SIZE = 4096 # Standard OS-level page size
-  ROWS_PER_PAGE = PAGE_SIZE / RECORD_SIZE # Inteeger division
-  PAGE_COUNT = 1000
 
-  # Get the page, and page_idx for a record idx
-  def page_idx(idx)
-    page = idx / ROWS_PER_PAGE
-    page_idx = idx % ROWS_PER_PAGE
-    [page, page_idx]
-  end
 
   # Strings are 64 bytes
   def serialize(record)
@@ -61,6 +124,7 @@ class Table
   def deserialize(bytes)
     bytes.unpack(FORMAT)
   end
+
 end
 
 def print_prompt()
@@ -74,6 +138,7 @@ end
 def parse_meta_command(cmd)
   case cmd
   when "exit"
+    $table.close()
     exit
   else
     raise SqlSyntaxError.new("Unsupported metacommand: '#{cmd}'.")
@@ -124,7 +189,7 @@ rescue => e
 end
 
 
-$table = Table.new
+$table = Table.new("prod.db")
 if $PROGRAM_NAME == __FILE__
   while true do
     print_prompt()

@@ -3,15 +3,51 @@ require "byebug"
 
 describe "glade" do
   before(:each) do
-    $table = Table.new
+    File.delete(db_name) if db_name != '/dev/null'  && File.exists?(db_name)
+    $table = Table.new(db_name)
   end
 
-  it "inserts and retrieves a row" do
-    result = parse_statement("INSERT 75.10 'yahn@google.com'")
-    resp = parse_statement("SELECT #{result}")
-    expect(resp[0]).to eq(75.10)
-    expect(resp[1]).to eq("yahn@google.com")
+  after(:each) do
+    $table.close()
   end
+
+  let(:db_name) { "/dev/null" }
+
+  context "basic functionality" do
+    it "inserts and retrieves a row" do
+      result = parse_statement("INSERT 75.10 'yahn@google.com'")
+      resp = parse_statement("SELECT #{result}")
+      expect(resp[0]).to eq(75.10)
+      expect(resp[1]).to eq("yahn@google.com")
+    end
+
+    it "inserts strings of fixed length" do
+      long = "a" * 64 # String limit
+      long_email = "#{long}@breaking.com"
+
+      result = parse_statement("INSERT 0 '#{long_email}'")
+      resp = parse_statement("SELECT #{result}")
+
+      expect(resp[0]).to eq(0)
+      expect(resp[1]).to eq(long)
+    end
+  end
+
+  context "persistence" do
+    let(:db_name) { "persist-tes.db" }
+
+    it "persists rows" do
+      result = parse_statement("INSERT 55 'persist@foreever.com'")
+
+      $table.close()
+
+      $table = Table.new(db_name)
+      resp = parse_statement("SELECT #{result}")
+      expect(resp[0]).to eq(55)
+      expect(resp[1]).to eq("persist@foreever.com")
+    end
+  end
+
 
   it "inserts and retrieves multiple rows" do
     result1 = parse_statement("INSERT -15.25 'test@fakemail.com'")
@@ -25,17 +61,6 @@ describe "glade" do
 
     expect(resp1[0]).to eq(-15.25)
     expect(resp1[1]).to eq("test@fakemail.com")
-  end
-
-  it "inserts strings of fixed length" do
-    long = "a" * 64 # String limit
-    long_email = "#{long}@breaking.com"
-
-    result = parse_statement("INSERT 0 '#{long_email}'")
-    resp = parse_statement("SELECT #{result}")
-
-    expect(resp[0]).to eq(0)
-    expect(resp[1]).to eq(long)
   end
 
   it "fails after limit is reached" do
