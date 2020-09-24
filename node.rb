@@ -1,21 +1,29 @@
 class CorruptNodeError < StandardError; end
-
-def load_node(page)
-  node_type = page.unpack("C").first
-  if node_type == Node::NODE_TYPE_INTERNAL
-    node = Node.new(page)
-  elsif node_type == Node::NODE_TYPE_LEAF
-    node = LeafNode.new(page)
-  else
-    raise CorruptNodeError
-  end
-  node
-end
+class LeafOverflowError < StandardError; end
 
 class Node
-  def initialize(page)
+  def initialize(page, node_type, is_root, parent_pointer)
     @page = page
-    @node_type, @is_root, @parent_pointer = page.unpack(COMMON_HEADER_FORMAT)
+    @node_type = node_type
+    @is_root = is_root
+    @parent_pointer = parent_pointer
+  end
+
+  def self.load(page)
+    node_type = page.unpack("C").first
+    case node_type
+    when NODE_TYPE_INTERNAL
+      klass = Node
+    when NODE_TYPE_LEAF
+      klass = LeafNode
+    else
+      raise CorruptNodeError
+    end
+    klass.from(page)
+  end
+
+  def self.from(page)
+    new(page, *page.unpack(COMMON_HEADER_FORMAT))
   end
 
   NODE_TYPE_INTERNAL = 0
@@ -25,16 +33,35 @@ class Node
 end
 
 class LeafNode < Node
-  def initialize(page)
-    @page = page
-    @node_type, @is_root, @parent_pointer, @num_cells = page.unpack(LEAF_HEADER_FORMAT)
+  def initialize(page, node_type, is_root, parent_node, num_cells)
+    super(page, node_type, is_root, parent_node)
+    @num_cells = num_cells
   end
 
-  def leaf_node_cell(cell_num)
+  def self.from(page)
+    new(page, *page.unpack(LEAF_HEADER_FORMAT))
+  end
+
+  def get_cell(cell_num)
     raise LeafOverflowError.new if cell_num >= @num_cells
 
-    raw_bytes = @page[LEAF_HEADER_SIZE + (cell_num * LEAF_NODE_CELL_SIZE), LEAF_NODE_CELL_SIZE]
-    Leaf.new(raw_bytes, LEAF_BODY_FORMAT)
+    cell_bytes = @page[cell_offset(cell_num), LEAF_NODE_CELL_SIZE]
+    LeafCell.new(cell_bytes, LEAF_CELL_FORMAT)
+  end
+
+  def add_cell(raw_bytes)
+    raise LeafOverflowError.new if @num_cells >= LEAF_NODE_MAX_CELLS
+
+    idx = @num_cells
+    cell_bytes = [idx, raw_bytes].pack(LEAF_CELL_FORMAT)
+    @page[cell_offset(idx), LEAF_NODE_CELL_SIZE] = cell_bytes
+    @num_cells += 1
+
+    idx
+  end
+
+  def cell_offset(cell_num)
+    LEAF_HEADER_SIZE + (cell_num * LEAF_NODE_CELL_SIZE)
   end
 
   LEAF_HEADER_FORMAT = "#{COMMON_HEADER_FORMAT}L"
@@ -46,7 +73,7 @@ class LeafNode < Node
   TABLE_FORMAT = "A#{ROW_SIZE}"
   PAGE_SIZE = 4096
 
-  LEAF_BODY_FORMAT = "L#{TABLE_FORMAT}"
+  LEAF_CELL_FORMAT = "L#{TABLE_FORMAT}"
   LEAF_NODE_KEY_SIZE = 4
   LEAF_NODE_VALUE_OFFSET = LEAF_NODE_KEY_SIZE
 
@@ -56,7 +83,7 @@ class LeafNode < Node
   LEAF_NODE_MAX_CELLS = LEAF_NODE_SPACE_FOR_CELLS / LEAF_NODE_CELL_SIZE
 end
 
-class Leaf
+class LeafCell
   attr_reader :data
   attr_reader :node_key
 
@@ -64,5 +91,4 @@ class Leaf
     @node_key, @data = bytes.unpack(format)
   end
 end
-
 

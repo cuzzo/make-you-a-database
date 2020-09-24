@@ -17,6 +17,11 @@ class Cursor
     @rows_per_page = Pager::PAGE_SIZE / @record_size
   end
 
+  def self.to(table, pos=0)
+    pos = table.num_rows - (pos + 1) if pos < 0
+    new(table, pos)
+  end
+
   def end?()
     row = table.num_rows
   end
@@ -45,14 +50,6 @@ class Cursor
 
     idx
   end
-end
-
-def table_start(table)
-  Cursor.new(table, 0)
-end
-
-def table_end(table)
-  Cursor.new(table, table.num_rows)
 end
 
 class Pager
@@ -160,12 +157,14 @@ def parse_meta_command(cmd)
 end
 
 def execute_insert(record)
-  table_end($table).write(record)
+  Cursor
+    .to($table, -1)
+    .write(record)
 end
 
 def execute_select(id)
   Cursor
-    .new($table, Integer(id))
+    .to($table, Integer(id))
     .read()
 rescue
   raise StandardError.new(:SelectError)

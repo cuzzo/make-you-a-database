@@ -90,7 +90,7 @@ describe "B-tree" do
 
   let(:record_format) { "DA64" }
 
-  it "properly stores data" do
+  it "desializes pages" do
     rows = [
       record_1.pack(record_format),
       record_2.pack(record_format)
@@ -105,16 +105,33 @@ describe "B-tree" do
       rows[0], # cell_data
       1, # cell_key_2
       rows[1] #  cell_data
-    ].pack(LeafNode::LEAF_HEADER_FORMAT + (LeafNode::LEAF_BODY_FORMAT * rows.count))
+    ].pack(LeafNode::LEAF_HEADER_FORMAT + (LeafNode::LEAF_CELL_FORMAT * rows.count))
 
-    root = load_node(page)
-    leaf = root.leaf_node_cell(1)
-    record = leaf.data.unpack(record_format)
+    root = Node.load(page)
+    cell = root.get_cell(1)
+    record = cell.data.unpack(record_format)
 
     expect(record).to eq(record_2)
 
-    leaf = root.leaf_node_cell(0)
+    leaf = root.get_cell(0)
     record = leaf.data.unpack(record_format)
+
+    expect(record).to eq(record_1)
+  end
+
+  it "stores cells" do
+    page = [
+      Node::NODE_TYPE_LEAF,
+      1,
+      0,
+      0
+    ].pack(LeafNode::LEAF_HEADER_FORMAT)
+
+    root = LeafNode.new(page, Node::NODE_TYPE_LEAF, 1, 0, 0)
+    cell_idx = root.add_cell(record_1.pack(record_format))
+
+    cell = root.get_cell(cell_idx)
+    record = cell.data.unpack(record_format)
 
     expect(record).to eq(record_1)
   end
