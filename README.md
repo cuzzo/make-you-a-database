@@ -23,7 +23,7 @@ For now, I'm focused on building something much, much simpler than Spanner.  I'm
 
 ## Design Decisions
 
-I've chosen Ruby as a starting language because it's one of my strongest languages. Although Ruby syntax can get a bit funky, it's also pretty easy for beginners to pick up and understand.
+I've chosen Ruby as a starting language because it's one of my strongest languages. Although Ruby syntax can get a bit funky, it's also pretty easy for beginners to pick up and understand. Since the goal is to make databases more accessible to folks, this seems like a good starting point.
 
 After I get a better understanding of how databases actually work, I will likely switch to a different language.
 
