@@ -1,4 +1,5 @@
 require_relative "glade.rb"
+require_relative "node.rb"
 require "byebug"
 
 describe "glade" do
@@ -75,5 +76,46 @@ describe "glade" do
       an_instance_of(PageOverflowError)
         .and having_attributes(message: "Cannot insert more records.")
       )
+  end
+end
+
+describe "B-tree" do
+  let(:record_1) {
+    [75.99, "test@big.com"]
+  }
+
+  let(:record_2) {
+    [20.25, "test@small.com"]
+  }
+
+  let(:record_format) { "DA64" }
+
+  it "properly stores data" do
+    rows = [
+      record_1.pack(record_format),
+      record_2.pack(record_format)
+    ]
+
+    page = [
+      Node::NODE_TYPE_LEAF, # node_type
+      1, # is_root
+      0, # parent
+      rows.count, # num_cells
+      0, # cell_key_1
+      rows[0], # cell_data
+      1, # cell_key_2
+      rows[1] #  cell_data
+    ].pack(LeafNode::LEAF_HEADER_FORMAT + (LeafNode::LEAF_BODY_FORMAT * rows.count))
+
+    root = load_node(page)
+    leaf = root.leaf_node_cell(1)
+    record = leaf.data.unpack(record_format)
+
+    expect(record).to eq(record_2)
+
+    leaf = root.leaf_node_cell(0)
+    record = leaf.data.unpack(record_format)
+
+    expect(record).to eq(record_1)
   end
 end
