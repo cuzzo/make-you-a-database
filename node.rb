@@ -1,5 +1,3 @@
-require  "byebug"
-
 class CorruptNodeError < StandardError; end
 
 def load_node(page)
