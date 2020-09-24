@@ -1,5 +1,7 @@
 # Make You a Database
 
+[![Actions Status](https://github.com/cuzzo/make-you-a-database/workflows/Ruby/badge.svg)](https://github.com/cuzzo/make-you-a-database/actions)
+
 I'm building a simple database to get a better understanding of how databases actually work. The goal is to focus on making the code as easy to follow and understand as possible.
 
 This is a learning experience I'll be documenting as I go.
